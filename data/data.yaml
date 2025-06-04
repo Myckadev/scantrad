@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 1
+names: ['bubble']
+
+roboflow:
+  workspace: scantrad-inxcw
+  project: scantrad-1fdwa
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/scantrad-inxcw/scantrad-1fdwa/dataset/1
