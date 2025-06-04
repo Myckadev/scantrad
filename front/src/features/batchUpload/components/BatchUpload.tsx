@@ -27,6 +27,9 @@ import {
   Visibility,
 } from '@mui/icons-material';
 import { useDropzone } from 'react-dropzone';
+import { Link } from 'react-router-dom';
+import { batchStore } from '../../../utils/batchStore';
+import type { ProcessedPage } from '../../../utils/batchStore';
 
 interface UploadedFile {
   file: File;
@@ -60,49 +63,57 @@ function BatchUpload() {
   });
 
   const removeFile = (id: string) => {
-    setFiles(prev => prev.filter(f => f.id !== id));
+    setFiles(prev => {
+      const fileToRemove = prev.find(f => f.id === id);
+      if (fileToRemove?.preview) {
+        URL.revokeObjectURL(fileToRemove.preview);
+      }
+      return prev.filter(f => f.id !== id);
+    });
   };
 
   const startProcessing = async () => {
     if (files.length === 0) return;
 
     setIsProcessing(true);
-    const newBatchId = `batch_${Date.now()}`;
+    
+    // Créer le batch dans le store
+    const actualFiles = files.map(f => f.file);
+    const newBatchId = batchStore.createBatch(actualFiles);
     setBatchId(newBatchId);
     
-    // Simuler le traitement
-    for (let i = 0; i < files.length; i++) {
-      const fileId = files[i].id;
-      
-      // Marquer comme en cours de traitement
-      setFiles(prev => prev.map(f => 
-        f.id === fileId 
-          ? { ...f, status: 'processing', progress: 0 }
-          : f
-      ));
-
-      // Simulation de progression
-      for (let progress = 0; progress <= 100; progress += 20) {
-        await new Promise(resolve => setTimeout(resolve, 300));
-        setFiles(prev => prev.map(f => 
-          f.id === fileId 
-            ? { ...f, progress }
-            : f
-        ));
-      }
-
-      // Marquer comme terminé
-      setFiles(prev => prev.map(f => 
-        f.id === fileId 
-          ? { ...f, status: 'done', progress: 100 }
-          : f
-      ));
+    // Mettre à jour l'état local pour refléter les IDs du batch
+    const batch = batchStore.getBatch(newBatchId);
+    if (batch) {
+      const updatedFiles = files.map((file, index) => ({
+        ...file,
+        id: batch.pages[index].id,
+        status: 'processing' as const,
+        progress: 0
+      }));
+      setFiles(updatedFiles);
     }
+
+    // Démarrer le traitement avec callbacks
+    await batchStore.processBatch(newBatchId, (pageId, progress, status) => {
+      setFiles(prev => prev.map(f => 
+        f.id === pageId 
+          ? { ...f, status, progress }
+          : f
+      ));
+    });
 
     setIsProcessing(false);
   };
 
   const clearFiles = () => {
+    // Nettoyer les URLs d'objets
+    files.forEach(file => {
+      if (file.preview) {
+        URL.revokeObjectURL(file.preview);
+      }
+    });
+    
     setFiles([]);
     setBatchId(null);
   };
@@ -250,7 +261,13 @@ function BatchUpload() {
           severity="success" 
           sx={{ mb: 2 }}
           action={
-            <Button color="inherit" size="small" startIcon={<Visibility />}>
+            <Button 
+              color="inherit" 
+              size="small" 
+              startIcon={<Visibility />}
+              component={Link}
+              to={`/gallery/${batchId}`}
+            >
               Voir la galerie
             </Button>
           }
@@ -274,7 +291,98 @@ function BatchUpload() {
           </Typography>
         </Paper>
       )}
+
+      {/* Historique des batches */}
+      <Paper sx={{ p: 3, mt: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          📚 Chapitres récents
+        </Typography>
+        <RecentBatches />
+      </Paper>
     </Box>
+  );
+}
+
+// Composant pour afficher les batches récents
+function RecentBatches() {
+  const [batches, setBatches] = useState(batchStore.getAllBatches().slice(0, 5));
+
+  React.useEffect(() => {
+    // Rafraîchir la liste toutes les secondes
+    const interval = setInterval(() => {
+      setBatches(batchStore.getAllBatches().slice(0, 5));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  if (batches.length === 0) {
+    return (
+      <Typography variant="body2" color="textSecondary" style={{ fontStyle: 'italic' }}>
+        Aucun chapitre traité pour le moment. Uploadez vos premières images !
+      </Typography>
+    );
+  }
+
+  return (
+    <List>
+      {batches.map((batch) => {
+        const completedPages = batch.pages.filter(p => p.status === 'done').length;
+        const totalPages = batch.pages.length;
+        const isCompleted = batch.status === 'done';
+        
+        return (
+          <ListItem 
+            key={batch.id}
+            sx={{ 
+              border: 1, 
+              borderColor: 'divider', 
+              borderRadius: 1, 
+              mb: 1,
+              '&:hover': { backgroundColor: 'action.hover' }
+            }}
+          >
+            <ListItemIcon>
+              {isCompleted ? (
+                <CheckCircle color="success" />
+              ) : (
+                <PlayArrow color="primary" />
+              )}
+            </ListItemIcon>
+            <ListItemText
+              primary={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography variant="subtitle2">
+                    Batch {batch.id.slice(-8)}
+                  </Typography>
+                  <Chip 
+                    label={`${completedPages}/${totalPages}`}
+                    size="small"
+                    color={isCompleted ? 'success' : 'primary'}
+                  />
+                </Box>
+              }
+              secondary={
+                <Typography variant="caption" color="textSecondary">
+                  Créé le {new Date(batch.createdAt).toLocaleString('fr-FR')}
+                  {batch.completedAt && ` • Terminé le ${new Date(batch.completedAt).toLocaleString('fr-FR')}`}
+                </Typography>
+              }
+            />
+            {isCompleted && (
+              <Button
+                component={Link}
+                to={`/gallery/${batch.id}`}
+                size="small"
+                startIcon={<Visibility />}
+              >
+                Voir
+              </Button>
+            )}
+          </ListItem>
+        );
+      })}
+    </List>
   );
 }
 

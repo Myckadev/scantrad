@@ -22,9 +22,11 @@ import {
 import { 
   CloudUpload, 
   PhotoLibrary, 
-  MenuBook 
+  MenuBook,
+  PlayArrow 
 } from '@mui/icons-material';
 import BatchUpload from "./features/batchUpload/components/BatchUpload";
+import Gallery from "./features/gallery/components/Gallery";
 
 // Thème MUI sombre et moderne
 const theme = createTheme({
@@ -109,47 +111,38 @@ function App() {
             <Routes>
               <Route path="/" element={<BatchUpload />} />
               
-              <Route path="/gallery/:batchId?" element={
-                <Box sx={{ textAlign: 'center', mt: 8 }}>
-                  <PhotoLibrary sx={{ fontSize: 80, color: 'primary.main', mb: 2 }} />
-                  <Typography variant="h4" gutterBottom>
-                    🖼️ Galerie en construction
-                  </Typography>
-                  <Typography variant="body1" color="textSecondary">
-                    Cette page affichera les résultats de traduction
-                  </Typography>
-                  <Button 
-                    variant="contained" 
-                    component={Link} 
-                    to="/" 
-                    sx={{ mt: 3 }}
-                    startIcon={<CloudUpload />}
-                  >
-                    Retour à l'upload
-                  </Button>
-                </Box>
-              } />
+              <Route path="/gallery/:batchId?" element={<Gallery />} />
 
               <Route path="/reader/:batchId?" element={
-                <Box sx={{ textAlign: 'center', mt: 8 }}>
-                  <MenuBook sx={{ fontSize: 80, color: 'secondary.main', mb: 2 }} />
-                  <Typography variant="h4" gutterBottom>
-                    📖 Lecteur en construction
-                  </Typography>
-                  <Typography variant="body1" color="textSecondary">
-                    Cette page permettra de lire les chapitres traduits
-                  </Typography>
-                  <Button 
-                    variant="contained" 
-                    component={Link} 
-                    to="/" 
-                    sx={{ mt: 3 }}
-                    startIcon={<CloudUpload />}
-                  >
-                    Retour à l'upload
-                  </Button>
-                </Box>
-              } />
+  <Box sx={{ textAlign: 'center', mt: 8 }}>
+    <MenuBook sx={{ fontSize: 80, color: 'secondary.main', mb: 2 }} />
+    <Typography variant="h4" gutterBottom>
+      📖 Lecteur Scan Trad
+    </Typography>
+    <Typography variant="body1" color="textSecondary" sx={{ mb: 3 }}>
+      Choisissez un chapitre traduit pour commencer la lecture
+    </Typography>
+    <Button 
+      variant="contained" 
+      component={Link} 
+      to="/gallery"
+      size="large"
+      startIcon={<PlayArrow />}
+      sx={{ mr: 2 }}
+    >
+      Aller à la galerie
+    </Button>
+    <Button 
+      variant="outlined" 
+      component={Link} 
+      to="/" 
+      size="large"
+      startIcon={<CloudUpload />}
+    >
+      Nouvel upload
+    </Button>
+  </Box>
+} />
             </Routes>
           </Container>
 
