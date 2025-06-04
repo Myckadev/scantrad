@@ -3,9 +3,9 @@ import {baseApi} from "../baseApi.ts";
 
 const fileUploadService = baseApi.injectEndpoints({
   endpoints: (builder) => ({
-    uploadFile: builder.mutation<any, any>({
+    uploadBatch: builder.mutation<any, FormData>({
       query: (formData) => ({
-        url: '/upload',
+        url: '/upload-batch',
         method: 'POST',
         body: formData,
       }),
@@ -15,5 +15,5 @@ const fileUploadService = baseApi.injectEndpoints({
 })
 
 export const {
-  useUploadFileMutation,
+  useUploadBatchMutation,
 } = fileUploadService;
