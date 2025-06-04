@@ -1,9 +1,10 @@
-import {createApi, fetchBaseQuery} from '@reduxjs/toolkit/query/react'
-import {BASE_API_URL} from "./env";
+import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 
 export const baseApi = createApi({
   reducerPath: 'api',
-  baseQuery: fetchBaseQuery({ baseUrl: `${BASE_API_URL}`}),
-  tagTypes: ['PROGRESS', 'USER'],
-  endpoints: () => ({})
-})
+  baseQuery: fetchBaseQuery({
+    baseUrl: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+  }),
+  tagTypes: ['Batch', 'Status', 'Result', 'PROGRESS'],
+  endpoints: () => ({}),
+});
