@@ -1,8 +1,8 @@
 
-Scantrad - v1 2025-06-04 10:50am
+Scantrad - v2 train and test
 ==============================
 
-This dataset was exported via roboflow.com on June 4, 2025 at 9:06 AM GMT
+This dataset was exported via roboflow.com on June 4, 2025 at 9:48 AM GMT
 
 Roboflow is an end-to-end computer vision platform that helps you
 * collaborate with your team on computer vision projects
