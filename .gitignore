@@ -26,4 +26,12 @@ dist-ssr
 .env
 *.env
 data/
-node_modules/
+dist/
+build/
+logs/
+*.log
+__pycache__/
+*.pyc
+.DS_Store
+front/
+
