@@ -50,6 +50,7 @@ async def get_user_by_pseudo(pseudo: str):
             "created_at": datetime.utcnow()
         }
         await app.mongodb.users.insert_one(new_user)
+
         return new_user
     return user
 
@@ -205,7 +206,6 @@ async def get_user_batches(pseudo: str):
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
-        await websocket.send_text("Connected to Scantrad WebSocket")
         while True:
             data = await websocket.receive_text()
             await manager.broadcast(f"Echo: {data}")
@@ -220,8 +220,7 @@ async def debug_db_status():
     """Endpoint pour vérifier le contenu de la base"""
     try:
         # Test de connexion
-        await app.mongodb.admin.command('ping')
-        
+        await app.mongodb_client.admin.command('ping')        
         users_count = await app.mongodb.users.count_documents({})
         batches_count = await app.mongodb.batches.count_documents({})
         
