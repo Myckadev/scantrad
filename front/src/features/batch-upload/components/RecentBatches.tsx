@@ -1,4 +1,3 @@
-// features/batchUpload/components/RecentBatches.tsx
 import React from 'react';
 import {
   List,

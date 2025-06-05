@@ -77,7 +77,7 @@ export const apiService = baseApi.injectEndpoints({
       query: (pseudo) => ({
         url: '/auth/login',
         method: 'POST',
-        params: { pseudo },
+        body: { pseudo },
       }),
       onQueryStarted: async (pseudo, { queryFulfilled }) => {
         try {
@@ -134,7 +134,7 @@ export const apiService = baseApi.injectEndpoints({
       query: (pseudo) => `/user/${pseudo}/batches`,
       providesTags: ['Batch'],
      transformResponse: (response: UserBatchesResponse) => {
-  return response;
+        return response;
      },
     }),
 

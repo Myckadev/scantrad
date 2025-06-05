@@ -1,4 +1,3 @@
-// features/gallery/components/PageViewer.tsx
 import { useState, useEffect, useCallback } from 'react';
 import {
   Dialog,

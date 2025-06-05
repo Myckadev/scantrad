@@ -1,5 +1,4 @@
-// features/batchUpload/components/BatchUpload.tsx - Adapté à l'API de Mikael
-import React, { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   Box,
   Paper,

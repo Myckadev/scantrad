@@ -14,7 +14,7 @@ import {
 } from "react-router-dom";
 import { theme } from "./app/theme";
 import Navigation from "./components/Navigation";
-import BatchUpload from "./features/batchUpload/components/BatchUpload";
+import BatchUpload from "./features/batch-upload/components/BatchUpload";
 import Gallery from "./features/gallery/components/Gallery";
 import ReaderPage from "./components/ReaderPage";
 

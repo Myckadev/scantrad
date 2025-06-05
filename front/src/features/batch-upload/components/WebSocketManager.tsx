@@ -1,4 +1,3 @@
-// features/batchUpload/components/WebSocketManager.tsx
 import { useEffect, useState } from 'react';
 import {
   Box,

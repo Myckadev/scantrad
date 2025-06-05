@@ -1,4 +1,3 @@
-// features/gallery/components/Gallery.tsx - Refactorisé avec API
 import React, { useState } from 'react';
 import {
   Box,
