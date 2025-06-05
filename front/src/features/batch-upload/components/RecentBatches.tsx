@@ -40,6 +40,8 @@ function RecentBatches({ batches }: RecentBatchesProps) {
     <List>
       {batches.slice(0, 5).map((batch) => {
         const isCompleted = batch.status === 'done';
+        const completedPages = batch.pages?.filter(p => p.status === 'done').length || 0;
+        const totalPages = batch.pages?.length || 0;
         
         return (
           <ListItem
@@ -66,7 +68,7 @@ function RecentBatches({ batches }: RecentBatchesProps) {
                     Batch {batch._id.slice(-8)}
                   </Typography>
                   <Chip
-                    label={`${batch.pages.filter(p => p.status === 'done').length}/${batch.pages.length}`}
+                    label={`${completedPages}/${totalPages}`}
                     size="small"
                     color={isCompleted ? 'success' : 'primary'}
                   />
