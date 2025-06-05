@@ -20,6 +20,50 @@ import io
 from PIL import Image
 import asyncio
 
+# Importation des modules de transformation - VERSION DYNAMIQUE
+import sys
+import os
+from pathlib import Path
+
+# Trouver dynamiquement le répertoire racine du projet "scantrad"
+current_file = Path(__file__).resolve()
+project_root = None
+
+# Remonter dans l'arborescence jusqu'à trouver le dossier "scantrad"
+for parent in current_file.parents:
+    if parent.name == "scantrad":
+        project_root = parent
+        break
+
+if project_root is None:
+    # Fallback: essayer de trouver via le nom du dossier
+    current_dir = Path.cwd()
+    for parent in [current_dir] + list(current_dir.parents):
+        if parent.name == "scantrad" or (parent / "transformer").exists():
+            project_root = parent
+            break
+
+if project_root:
+    transformer_path = str(project_root)
+    if transformer_path not in sys.path:
+        sys.path.insert(0, transformer_path)
+    print(f"Chemin du projet détecté: {project_root}")
+else:
+    print("Impossible de détecter le chemin du projet automatiquement")
+    # Fallback en cas d'échec
+    current_dir = Path(__file__).parent.parent.parent
+    sys.path.insert(0, str(current_dir))
+
+try:
+    from transformer.herlpers.script_for_app import process_image
+    print("Module de transformation importé avec succès")
+except ImportError as e:
+    print(f"Erreur d'import du module de transformation: {e}")
+    # Fonction de fallback
+    def process_image(image):
+        print("Utilisation de la fonction de fallback")
+        return image
+
 app = FastAPI()
 
 # CORS pour le frontend - Configuration corrigée pour Codespaces
@@ -152,12 +196,12 @@ async def upload_batch(
     batch_dict["_id"] = batch_dict.pop("id")
     await app.mongodb.batches.insert_one(batch_dict)
     
-    background_tasks.add_task(simulate_processing, batch_id, user["_id"])
+    background_tasks.add_task(transform_processing, batch_id, user["_id"])
     
     return UploadBatchResponse(batchId=batch_id)
 
-async def simulate_processing(batch_id: str, user_id: str):
-    """Simule le traitement de traduction en changeant progressivement les statuts"""
+async def transform_processing(batch_is: str, user_id: str):
+    """Traitement réel des images avec le modèle YOLO et traduction"""
     batch = await app.mongodb.batches.find_one({"_id": batch_id})
     if not batch:
         return
@@ -169,8 +213,8 @@ async def simulate_processing(batch_id: str, user_id: str):
         if not page:
             continue
             
-        # Attendre 3 secondes avant de commencer le traitement
-        await asyncio.sleep(3)
+        # Attendre 1 seconde avant de commencer le traitement
+        await asyncio.sleep(1)
         
         # Changer le statut à "processing"
         await app.mongodb.pages.update_one(
@@ -181,41 +225,57 @@ async def simulate_processing(batch_id: str, user_id: str):
         # Broadcaster l'update via WebSocket
         await manager.broadcast(f"Page {page['filename']} is processing")
         
-        # Attendre 5 secondes pour simuler le traitement
-        await asyncio.sleep(5)
-        
-        # Simuler la traduction (copier l'image originale)
-        translated_url = f"data:image/jpeg;base64,{page['original_image']}"
-        
-        # Mettre à jour la page avec la traduction
-        await app.mongodb.pages.update_one(
-            {"_id": page_id},
-            {"$set": {
-                "status": "done",
-                "translated_image": page["original_image"],
-                "translated_url": translated_url
-            }}
-        )
-        
-        # Sauvegarder la page traduite dans une collection séparée
-        translated_page = {
-            "_id": str(uuid.uuid4()),
-            "page_id": page_id,
-            "user_id": user_id,
-            "batch_id": batch_id,
-            "filename": page["filename"],
-            "original_image": page["original_image"],
-            "translated_image": page["original_image"],
-            "original_url": page["original_url"],
-            "translated_url": translated_url,
-            "translation_completed_at": datetime.utcnow(),
-            "processing_time_seconds": 8
-        }
-        
-        await app.mongodb.translated_pages.insert_one(translated_page)
-        
-        # Broadcaster l'update via WebSocket
-        await manager.broadcast(f"Page {page['filename']} is done")
+        try:
+            # Décoder l'image base64
+            image_data = base64.b64decode(page['original_image'])
+            original_image = Image.open(io.BytesIO(image_data)).convert("RGB")
+            
+            # Traitement réel avec le modèle
+            translated_image = process_image(original_image)
+            
+            # Convertir l'image traduite en base64
+            buffer = io.BytesIO()
+            translated_image.save(buffer, format="PNG")
+            translated_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            translated_url = f"data:image/png;base64,{translated_base64}"
+            
+            # Mettre à jour la page avec la traduction
+            await app.mongodb.pages.update_one(
+                {"_id": page_id},
+                {"$set": {
+                    "status": "done",
+                    "translated_image": translated_base64,
+                    "translated_url": translated_url
+                }}
+            )
+            
+            # Sauvegarder la page traduite dans une collection séparée
+            translated_page = {
+                "_id": str(uuid.uuid4()),
+                "page_id": page_id,
+                "user_id": user_id,
+                "batch_id": batch_id,
+                "filename": page["filename"],
+                "original_image": page["original_image"],
+                "translated_image": translated_base64,
+                "original_url": page["original_url"],
+                "translated_url": translated_url,
+                "translation_completed_at": datetime.utcnow(),
+                "processing_time_seconds": 3
+            }
+            
+            await app.mongodb.translated_pages.insert_one(translated_page)
+            
+            # Broadcaster l'update via WebSocket
+            await manager.broadcast(f"Page {page['filename']} is done")
+            
+        except Exception as e:
+            # En cas d'erreur, marquer la page comme échouée
+            await app.mongodb.pages.update_one(
+                {"_id": page_id},
+                {"$set": {"status": "error", "error_message": str(e)}}
+            )
+            await manager.broadcast(f"Page {page['filename']} failed: {str(e)}")
     
     # Mettre à jour le statut du batch à "completed"
     await app.mongodb.batches.update_one(

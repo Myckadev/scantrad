@@ -1,11 +1,51 @@
 from ultralytics import YOLO
 from PIL import Image
 from io import BytesIO
+import os
+from pathlib import Path
 
 from herlpers.extract_and_translate import extract_and_translate
 from herlpers.draw import draw_translations
 
-model = YOLO("scantrad/transformer/yolo_scan_model.pt")
+# Charger le modèle de manière dynamique
+def find_model_path():
+    """Trouve le chemin du modèle YOLO de manière dynamique"""
+    current_file = Path(__file__).resolve()
+    
+    # Chemins possibles relatifs au projet
+    possible_paths = [
+        # Relatif au fichier actuel
+        current_file.parent.parent / "yolo_scan_model.pt",
+        # Relatif à la racine du projet
+        current_file.parent.parent.parent / "yolo_scan_model.pt",
+        # Dans le dossier transformer
+        current_file.parent.parent / "transformer" / "yolo_scan_model.pt"
+    ]
+    
+    # Chercher dans les dossiers parents pour "scantrad"
+    for parent in current_file.parents:
+        if parent.name == "scantrad":
+            possible_paths.extend([
+                parent / "transformer" / "yolo_scan_model.pt",
+                parent / "yolo_scan_model.pt"
+            ])
+            break
+    
+    # Tester chaque chemin
+    for path in possible_paths:
+        if path.exists():
+            print(f"Modèle YOLO trouvé: {path}")
+            return str(path)
+    
+    print("Modèle YOLO non trouvé dans les emplacements standards")
+    return None
+
+model_path = find_model_path()
+if model_path:
+    model = YOLO(model_path)
+else:
+    print("Warning: YOLO model not found")
+    model = None
 
 def yolo_prediction_to_yolo_format(results, image_size):
     width, height = image_size
@@ -22,12 +62,17 @@ def yolo_prediction_to_yolo_format(results, image_size):
     return yolo_boxes
 
 def process_image(input_image: Image.Image) -> Image.Image:
-    results = model(input_image)[0]
-
-    yolo_boxes = yolo_prediction_to_yolo_format(results, input_image.size)
-
-    translations = extract_and_translate(input_image, yolo_boxes)
-
-    final_image = draw_translations(input_image, translations)
-
-    return final_image
+    if model is None:
+        # Retourner l'image originale si le modèle n'est pas disponible
+        print("Model not available, returning original image")
+        return input_image
+    
+    try:
+        results = model(input_image)[0]
+        yolo_boxes = yolo_prediction_to_yolo_format(results, input_image.size)
+        translations = extract_and_translate(input_image, yolo_boxes)
+        final_image = draw_translations(input_image, translations)
+        return final_image
+    except Exception as e:
+        print(f"Error processing image: {e}")
+        return input_image
