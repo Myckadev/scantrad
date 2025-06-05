@@ -1,101 +1,22 @@
-import React, { useState } from 'react';
-import { 
-  Typography, 
-  ThemeProvider, 
-  CssBaseline, 
-  AppBar, 
-  Toolbar, 
-  Container, 
+// App.tsx refactorisé
+import { useState } from 'react';
+import {
+  Typography,
+  ThemeProvider,
+  CssBaseline,
+  Container,
   Box,
-  createTheme,
-  Button,
-  Stack
 } from "@mui/material";
-import { 
-  BrowserRouter as Router, 
-  Route, 
-  Routes, 
-  Link, 
-  useNavigate,
-  useLocation 
+import {
+  BrowserRouter as Router,
+  Route,
+  Routes,
 } from "react-router-dom";
-import { 
-  CloudUpload, 
-  PhotoLibrary, 
-  MenuBook,
-  PlayArrow 
-} from '@mui/icons-material';
+import { theme } from "./app/theme";
+import Navigation from "./components/Navigation";
 import BatchUpload from "./features/batchUpload/components/BatchUpload";
 import Gallery from "./features/gallery/components/Gallery";
-
-// Thème MUI sombre et moderne
-const theme = createTheme({
-  palette: {
-    mode: 'dark',
-    primary: {
-      main: '#64b5f6',
-    },
-    secondary: {
-      main: '#ff7043',
-    },
-    background: {
-      default: '#0a0a0a',
-      paper: '#1a1a1a',
-    },
-  },
-  typography: {
-    h4: {
-      fontWeight: 600,
-    },
-    h6: {
-      fontWeight: 500,
-    }
-  }
-});
-
-function Navigation() {
-  const location = useLocation();
-  
-  return (
-    <AppBar position="static" sx={{ background: 'linear-gradient(45deg, #1976d2 30%, #64b5f6 90%)' }}>
-      <Toolbar>
-        <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 'bold' }}>
-          🗾 Scan Trad - Traduction de Manga
-        </Typography>
-        
-        <Stack direction="row" spacing={2}>
-          <Button 
-            color="inherit" 
-            component={Link} 
-            to="/"
-            variant={location.pathname === '/' ? 'outlined' : 'text'}
-            startIcon={<CloudUpload />}
-          >
-            Upload
-          </Button>
-          <Button 
-            color="inherit" 
-            component={Link} 
-            to="/gallery"
-            variant={location.pathname.includes('/gallery') ? 'outlined' : 'text'}
-            startIcon={<PhotoLibrary />}
-          >
-            Galerie
-          </Button>
-          <Button 
-            color="inherit" 
-            component={Link} 
-            to="/reader"
-            variant={location.pathname.includes('/reader') ? 'outlined' : 'text'}
-            startIcon={<MenuBook />}
-          >
-            Lecteur
-          </Button>
-        </Stack>
-      </Toolbar>
-    </AppBar>
-  );
-}
+import ReaderPage from "./components/ReaderPage";
 
 function App() {
   const [mockingStarted] = useState(true);
@@ -107,51 +28,26 @@ function App() {
         <div className="App">
           <Navigation />
 
-          <Container maxWidth="xl" sx={{ mt: 4, mb: 4, minHeight: 'calc(100vh - 200px)' }}>
+          <Container maxWidth="lg" sx={{ 
+            mt: 4, 
+            mb: 4, 
+            minHeight: 'calc(100vh - 200px)',
+            mx: 'auto'
+          }}>
             <Routes>
               <Route path="/" element={<BatchUpload />} />
-              
-              <Route path="/gallery/:batchId?" element={<Gallery />} />
-
-              <Route path="/reader/:batchId?" element={
-  <Box sx={{ textAlign: 'center', mt: 8 }}>
-    <MenuBook sx={{ fontSize: 80, color: 'secondary.main', mb: 2 }} />
-    <Typography variant="h4" gutterBottom>
-      📖 Lecteur Scan Trad
-    </Typography>
-    <Typography variant="body1" color="textSecondary" sx={{ mb: 3 }}>
-      Choisissez un chapitre traduit pour commencer la lecture
-    </Typography>
-    <Button 
-      variant="contained" 
-      component={Link} 
-      to="/gallery"
-      size="large"
-      startIcon={<PlayArrow />}
-      sx={{ mr: 2 }}
-    >
-      Aller à la galerie
-    </Button>
-    <Button 
-      variant="outlined" 
-      component={Link} 
-      to="/" 
-      size="large"
-      startIcon={<CloudUpload />}
-    >
-      Nouvel upload
-    </Button>
-  </Box>
-} />
+              <Route path="/gallery" element={<Gallery />} />
+              <Route path="/gallery/:batchId" element={<Gallery />} />
+              <Route path="/reader/:batchId?" element={<ReaderPage />} />
             </Routes>
           </Container>
 
           {/* Footer avec status */}
-          <Box sx={{ 
-            mt: 'auto', 
-            py: 2, 
-            textAlign: 'center', 
-            borderTop: 1, 
+          <Box sx={{
+            mt: 'auto',
+            py: 2,
+            textAlign: 'center',
+            borderTop: 1,
             borderColor: 'divider',
             backgroundColor: 'background.paper'
           }}>
@@ -160,7 +56,7 @@ function App() {
             </Typography>
           </Box>
 
-          {/* Indicateur mock backend */}
+          {/* Indicateur backend réel */}
           {mockingStarted && (
             <Box
               sx={{
@@ -176,7 +72,7 @@ function App() {
                 boxShadow: '0 4px 8px rgba(0,0,0,0.3)'
               }}
             >
-              🎭 Backend Mock Actif
+              🐳 Backend Docker Actif
             </Box>
           )}
         </div>

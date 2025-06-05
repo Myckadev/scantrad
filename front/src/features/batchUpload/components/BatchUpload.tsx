@@ -1,54 +1,74 @@
-import React, { useState, useCallback } from 'react';
+// features/batchUpload/components/BatchUpload.tsx - Adapté à l'API de Mikael
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   Box,
   Paper,
   Typography,
   Button,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
-  Chip,
   Alert,
-  LinearProgress,
-  IconButton,
-  Grid,
-  Card,
-  CardMedia,
-  CardContent,
+  TextField,
 } from '@mui/material';
 import {
   CloudUpload,
-  Image as ImageIcon,
-  CheckCircle,
-  Error as ErrorIcon,
   Delete as DeleteIcon,
   PlayArrow,
-  Visibility,
+  Login,
 } from '@mui/icons-material';
 import { useDropzone } from 'react-dropzone';
-import { Link } from 'react-router-dom';
-import { batchStore } from '../../../utils/batchStore';
-import type { ProcessedPage } from '../../../utils/batchStore';
+import { useNavigate } from 'react-router-dom';
+import { 
+  useUploadBatchMutation, 
+  useGetUserBatchesQuery,
+  useLoginMutation,
+  getCurrentUser,
+} from '../../../app/services/api';
+import FileCard from './FileCard';
+import RecentBatches from './RecentBatches';
+import WebSocketManager from './WebSocketManager';
 
 interface UploadedFile {
   file: File;
   id: string;
-  status: 'pending' | 'uploading' | 'processing' | 'done' | 'error';
   preview?: string;
-  progress?: number;
 }
 
 function BatchUpload() {
+  const navigate = useNavigate();
   const [files, setFiles] = useState<UploadedFile[]>([]);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [batchId, setBatchId] = useState<string | null>(null);
+  const [userPseudo, setUserPseudo] = useState(getCurrentUser());
+  const [isLoggedIn, setIsLoggedIn] = useState(!!getCurrentUser());
+  
+  const [login, { isLoading: isLoggingIn, error: loginError }] = useLoginMutation();
+  const [uploadBatch, { isLoading: isUploading, error: uploadError }] = useUploadBatchMutation();
+  
+  const { 
+    data: userBatchesResponse, 
+    refetch: refetchBatches,
+    isLoading: isLoadingBatches 
+  } = useGetUserBatchesQuery(userPseudo, {
+    skip: !isLoggedIn,
+  });
+
+  const userBatches = userBatchesResponse?.batches || [];
+
+  const handleLogin = async () => {
+    if (!userPseudo || userPseudo.trim().length < 2) {
+      return;
+    }
+    
+    try {
+      await login(userPseudo.trim()).unwrap();
+      setIsLoggedIn(true);
+      refetchBatches();
+    } catch (error) {
+      console.error('Login failed:', error);
+    }
+  };
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const newFiles: UploadedFile[] = acceptedFiles.map(file => ({
       file,
       id: Math.random().toString(36).substr(2, 9),
-      status: 'pending',
       preview: URL.createObjectURL(file)
     }));
     setFiles(prev => [...prev, ...newFiles]);
@@ -59,7 +79,8 @@ function BatchUpload() {
     accept: {
       'image/*': ['.png', '.jpg', '.jpeg', '.webp', '.gif']
     },
-    multiple: true
+    multiple: true,
+    disabled: !isLoggedIn
   });
 
   const removeFile = (id: string) => {
@@ -73,100 +94,138 @@ function BatchUpload() {
   };
 
   const startProcessing = async () => {
-    if (files.length === 0) return;
+    if (files.length === 0 || !isLoggedIn) return;
 
-    setIsProcessing(true);
-    
-    // Créer le batch dans le store
-    const actualFiles = files.map(f => f.file);
-    const newBatchId = batchStore.createBatch(actualFiles);
-    setBatchId(newBatchId);
-    
-    // Mettre à jour l'état local pour refléter les IDs du batch
-    const batch = batchStore.getBatch(newBatchId);
-    if (batch) {
-      const updatedFiles = files.map((file, index) => ({
-        ...file,
-        id: batch.pages[index].id,
-        status: 'processing' as const,
-        progress: 0
-      }));
-      setFiles(updatedFiles);
+    try {
+      // Créer le FormData avec les fichiers
+      const formData = new FormData();
+      files.forEach((fileData) => {
+        formData.append('files', fileData.file);
+      });
+
+      // L'API de Mikael utilise le header X-User-Pseudo automatiquement
+      const result = await uploadBatch(formData).unwrap();
+      
+      // Nettoyer les fichiers locaux
+      clearFiles();
+      
+      // Rafraîchir la liste des batches
+      refetchBatches();
+      
+      // Rediriger vers la galerie du nouveau batch
+      navigate(`/gallery/${result.batchId}`);
+      
+    } catch (error) {
+      console.error('Erreur lors de l\'upload:', error);
     }
-
-    // Démarrer le traitement avec callbacks
-    await batchStore.processBatch(newBatchId, (pageId, progress, status) => {
-      setFiles(prev => prev.map(f => 
-        f.id === pageId 
-          ? { ...f, status, progress }
-          : f
-      ));
-    });
-
-    setIsProcessing(false);
   };
 
   const clearFiles = () => {
-    // Nettoyer les URLs d'objets
     files.forEach(file => {
       if (file.preview) {
         URL.revokeObjectURL(file.preview);
       }
     });
-    
     setFiles([]);
-    setBatchId(null);
   };
 
-  const getStatusIcon = (status: UploadedFile['status']) => {
-    switch (status) {
-      case 'done': return <CheckCircle color="success" />;
-      case 'error': return <ErrorIcon color="error" />;
-      case 'processing': return <PlayArrow color="primary" />;
-      default: return <ImageIcon />;
-    }
-  };
+  // Nettoyer les URLs d'objets au démontage
+  useEffect(() => {
+    return () => {
+      files.forEach(file => {
+        if (file.preview) {
+          URL.revokeObjectURL(file.preview);
+        }
+      });
+    };
+  }, [files]);
 
-  const getStatusColor = (status: UploadedFile['status']) => {
-    switch (status) {
-      case 'done': return 'success';
-      case 'error': return 'error';
-      case 'processing': return 'primary';
-      default: return 'default';
-    }
-  };
-
-  const allProcessed = files.length > 0 && files.every(f => f.status === 'done');
+  // Si pas connecté, afficher le formulaire de login
+  if (!isLoggedIn) {
+    return (
+      <Box sx={{ maxWidth: 600, mx: 'auto', p: 3 }}>
+        <Paper sx={{ p: 4, textAlign: 'center' }}>
+          <Typography variant="h4" gutterBottom>
+            🗾 Connexion ScanTrad
+          </Typography>
+          <Typography variant="body1" color="textSecondary" sx={{ mb: 3 }}>
+            Entrez votre pseudo pour commencer à traduire vos mangas
+          </Typography>
+          
+          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+            <TextField
+              fullWidth
+              label="Votre pseudo"
+              value={userPseudo}
+              onChange={(e) => setUserPseudo(e.target.value)}
+              variant="outlined"
+              disabled={isLoggingIn}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter') {
+                  handleLogin();
+                }
+              }}
+              helperText="Minimum 2 caractères"
+            />
+            <Button
+              variant="contained"
+              onClick={handleLogin}
+              disabled={isLoggingIn || !userPseudo || userPseudo.trim().length < 2}
+              startIcon={<Login />}
+              sx={{ minWidth: 120 }}
+            >
+              {isLoggingIn ? 'Connexion...' : 'Se connecter'}
+            </Button>
+          </Box>
+          
+          {loginError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              Erreur de connexion: {loginError.toString()}
+            </Alert>
+          )}
+        </Paper>
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ maxWidth: 1200, mx: 'auto', p: 3 }}>
-      <Typography variant="h4" gutterBottom align="center" sx={{ mb: 4 }}>
-        Upload de Manga
-      </Typography>
+      {/* WebSocket Manager pour les updates temps réel */}
+      <WebSocketManager />
+      
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+        <Typography variant="h4" gutterBottom>
+          📤 Upload de Manga
+        </Typography>
+        <Typography variant="subtitle1" color="primary">
+          Connecté en tant que: <strong>{userPseudo}</strong>
+        </Typography>
+      </Box>
       
       {/* Zone de drag & drop */}
-      <Paper 
-        {...getRootProps()} 
-        sx={{ 
-          p: 4, 
-          textAlign: 'center', 
+      <Paper
+        {...getRootProps()}
+        sx={{
+          p: 4,
+          textAlign: 'center',
           border: isDragActive ? '3px solid #1976d2' : '2px dashed #ddd',
           backgroundColor: isDragActive ? '#f3f8ff' : 'transparent',
-          cursor: 'pointer',
+          cursor: isLoggedIn ? 'pointer' : 'not-allowed',
           mb: 3,
           transition: 'all 0.3s ease',
-          '&:hover': {
+          opacity: isLoggedIn ? 1 : 0.6,
+          '&:hover': isLoggedIn ? {
             backgroundColor: '#f8f9fa',
             borderColor: '#1976d2'
-          }
+          } : {}
         }}
       >
         <input {...getInputProps()} />
         <CloudUpload sx={{ fontSize: 64, color: 'primary.main', mb: 2 }} />
         <Typography variant="h6" gutterBottom>
-          {isDragActive 
-            ? "Déposez vos fichiers ici..." 
-            : "Glissez-déposez vos images ou cliquez pour sélectionner"
+          {isDragActive
+            ? "📥 Déposez vos fichiers ici..."
+            : "🖼️ Glissez-déposez vos images ou cliquez pour sélectionner"
           }
         </Typography>
         <Typography variant="body2" color="textSecondary">
@@ -174,27 +233,34 @@ function BatchUpload() {
         </Typography>
       </Paper>
 
+      {/* Erreurs */}
+      {uploadError && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          Erreur lors de l'upload: {uploadError.toString()}
+        </Alert>
+      )}
+
       {/* Galerie des fichiers */}
       {files.length > 0 && (
         <Paper sx={{ p: 3, mb: 3 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
             <Typography variant="h6">
-              Fichiers sélectionnés ({files.length})
+              📁 Fichiers sélectionnés ({files.length})
             </Typography>
             <Box sx={{ display: 'flex', gap: 2 }}>
-              <Button 
-                variant="contained" 
+              <Button
+                variant="contained"
                 onClick={startProcessing}
-                disabled={isProcessing || allProcessed}
+                disabled={isUploading}
                 startIcon={<PlayArrow />}
                 size="large"
               >
-                {isProcessing ? 'Traitement en cours...' : allProcessed ? 'Traitement terminé' : 'Démarrer le traitement'}
+                {isUploading ? 'Upload en cours...' : 'Démarrer le traitement'}
               </Button>
-              <Button 
-                variant="outlined" 
+              <Button
+                variant="outlined"
                 onClick={clearFiles}
-                disabled={isProcessing}
+                disabled={isUploading}
                 startIcon={<DeleteIcon />}
               >
                 Vider
@@ -202,92 +268,27 @@ function BatchUpload() {
             </Box>
           </Box>
 
-          <Grid container spacing={2}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
             {files.map((fileData) => (
-              <Grid item xs={12} sm={6} md={4} key={fileData.id}>
-                <Card sx={{ position: 'relative' }}>
-                  {fileData.preview && (
-                    <CardMedia
-                      component="img"
-                      height="200"
-                      image={fileData.preview}
-                      alt={fileData.file.name}
-                      sx={{ objectFit: 'cover' }}
-                    />
-                  )}
-                  <CardContent sx={{ pb: 1 }}>
-                    <Typography variant="subtitle2" noWrap title={fileData.file.name}>
-                      {fileData.file.name}
-                    </Typography>
-                    <Typography variant="caption" color="textSecondary">
-                      {(fileData.file.size / 1024 / 1024).toFixed(2)} MB
-                    </Typography>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
-                      <Chip 
-                        label={fileData.status}
-                        color={getStatusColor(fileData.status) as any}
-                        size="small"
-                        icon={getStatusIcon(fileData.status)}
-                      />
-                      {!isProcessing && (
-                        <IconButton size="small" onClick={() => removeFile(fileData.id)}>
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      )}
-                    </Box>
-                    {fileData.status === 'processing' && (
-                      <Box sx={{ mt: 1 }}>
-                        <LinearProgress 
-                          variant="determinate" 
-                          value={fileData.progress || 0} 
-                          sx={{ borderRadius: 1 }}
-                        />
-                        <Typography variant="caption" sx={{ mt: 0.5, display: 'block' }}>
-                          {fileData.progress || 0}% - Détection + OCR + Traduction...
-                        </Typography>
-                      </Box>
-                    )}
-                  </CardContent>
-                </Card>
-              </Grid>
+              <FileCard
+                key={fileData.id}
+                fileData={fileData}
+                onRemove={removeFile}
+                disabled={isUploading}
+              />
             ))}
-          </Grid>
+          </div>
         </Paper>
       )}
 
-      {/* Résultats */}
-      {batchId && allProcessed && (
-        <Alert 
-          severity="success" 
-          sx={{ mb: 2 }}
-          action={
-            <Button 
-              color="inherit" 
-              size="small" 
-              startIcon={<Visibility />}
-              component={Link}
-              to={`/gallery/${batchId}`}
-            >
-              Voir la galerie
-            </Button>
-          }
-        >
-          🎉 <strong>Traitement terminé !</strong>
-          <br />
-          Batch ID: <code>{batchId}</code>
-          <br />
-          {files.length} page(s) de manga traduites avec succès !
-        </Alert>
-      )}
-
-      {/* Indicateur de traitement global */}
-      {isProcessing && (
-        <Paper sx={{ p: 2, textAlign: 'center', backgroundColor: '#f3f8ff' }}>
+      {/* Indicateur de traitement */}
+      {isUploading && (
+        <Paper sx={{ p: 2, textAlign: 'center', backgroundColor: '#f3f8ff', mb: 3 }}>
           <Typography variant="h6" gutterBottom>
-            🤖 Traitement IA en cours...
+            🚀 Upload vers le serveur...
           </Typography>
           <Typography variant="body2" color="textSecondary">
-            1. Détection des bulles de texte (YOLO) → 2. Reconnaissance de texte (OCR) → 3. Traduction (Transformer)
+            Vos images sont en cours d'envoi. Le traitement IA commencera automatiquement.
           </Typography>
         </Paper>
       )}
@@ -297,92 +298,17 @@ function BatchUpload() {
         <Typography variant="h6" gutterBottom>
           📚 Chapitres récents
         </Typography>
-        <RecentBatches />
+        {isLoadingBatches ? (
+          <Typography variant="body2" color="textSecondary">
+            Chargement des batches...
+          </Typography>
+        ) : (
+          <RecentBatches 
+            batches={userBatches || []} 
+          />
+        )}
       </Paper>
     </Box>
-  );
-}
-
-// Composant pour afficher les batches récents
-function RecentBatches() {
-  const [batches, setBatches] = useState(batchStore.getAllBatches().slice(0, 5));
-
-  React.useEffect(() => {
-    // Rafraîchir la liste toutes les secondes
-    const interval = setInterval(() => {
-      setBatches(batchStore.getAllBatches().slice(0, 5));
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  if (batches.length === 0) {
-    return (
-      <Typography variant="body2" color="textSecondary" style={{ fontStyle: 'italic' }}>
-        Aucun chapitre traité pour le moment. Uploadez vos premières images !
-      </Typography>
-    );
-  }
-
-  return (
-    <List>
-      {batches.map((batch) => {
-        const completedPages = batch.pages.filter(p => p.status === 'done').length;
-        const totalPages = batch.pages.length;
-        const isCompleted = batch.status === 'done';
-        
-        return (
-          <ListItem 
-            key={batch.id}
-            sx={{ 
-              border: 1, 
-              borderColor: 'divider', 
-              borderRadius: 1, 
-              mb: 1,
-              '&:hover': { backgroundColor: 'action.hover' }
-            }}
-          >
-            <ListItemIcon>
-              {isCompleted ? (
-                <CheckCircle color="success" />
-              ) : (
-                <PlayArrow color="primary" />
-              )}
-            </ListItemIcon>
-            <ListItemText
-              primary={
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Typography variant="subtitle2">
-                    Batch {batch.id.slice(-8)}
-                  </Typography>
-                  <Chip 
-                    label={`${completedPages}/${totalPages}`}
-                    size="small"
-                    color={isCompleted ? 'success' : 'primary'}
-                  />
-                </Box>
-              }
-              secondary={
-                <Typography variant="caption" color="textSecondary">
-                  Créé le {new Date(batch.createdAt).toLocaleString('fr-FR')}
-                  {batch.completedAt && ` • Terminé le ${new Date(batch.completedAt).toLocaleString('fr-FR')}`}
-                </Typography>
-              }
-            />
-            {isCompleted && (
-              <Button
-                component={Link}
-                to={`/gallery/${batch.id}`}
-                size="small"
-                startIcon={<Visibility />}
-              >
-                Voir
-              </Button>
-            )}
-          </ListItem>
-        );
-      })}
-    </List>
   );
 }
 
