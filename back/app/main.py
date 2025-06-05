@@ -22,12 +22,21 @@ import asyncio
 
 app = FastAPI()
 
-# CORS pour le frontend
+# CORS pour le frontend - Configuration corrigée pour Codespaces
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=[
+        "https://urban-goggles-vw9vq5w6g5x245-3000.app.github.dev",
+        "https://urban-goggles-vw9vq5w6g5x245-3001.app.github.dev", 
+        "https://urban-goggles-vw9vq5w6g5x245-5173.app.github.dev",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "*"  # Fallback permissif pour le développement
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 # MongoDB connection
