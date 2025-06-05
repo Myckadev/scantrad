@@ -21,7 +21,8 @@ export interface PageData {
 export interface Batch {
   _id: string;
   user_id: string;
-  pages: PageData[];
+  pages_ids: string[];
+  pages: Array<{status: string}>;
   created_at: string;
   status: 'pending' | 'processing' | 'done' | 'error';
 }
@@ -60,6 +61,15 @@ export interface BatchTranslatedPagesResponse {
   translated_pages: TranslatedPage[];
 }
 
+export interface PageUploadRequest {
+  filename: string;
+  image_base64: string;
+}
+
+export interface UploadBatchRequest {
+  pages: PageUploadRequest[];
+}
+
 // Helper pour gérer l'auth - pseudo stocké globalement ou via context
 let currentUserPseudo = ''; // Vide au départ
 
@@ -90,16 +100,20 @@ export const apiService = baseApi.injectEndpoints({
     }),
 
     // Upload d'un batch
-    uploadBatch: builder.mutation<{ batchId: string }, FormData>({
-      query: (formData) => ({
+    uploadBatch: builder.mutation<{ batchId: string }, UploadBatchRequest>({
+      query: (uploadRequest) => ({
         url: '/upload-batch',
         method: 'POST',
-        body: formData,
+        body: uploadRequest,
         headers: {
+          'Content-Type': 'application/json',
           'X-User-Pseudo': getCurrentUser(),
         },
       }),
-      invalidatesTags: ['Batch', 'PROGRESS'],
+      invalidatesTags: (result, error, arg) => [
+        'Batch',
+        { type: 'UserBatches', id: getCurrentUser() }
+      ],
     }),
 
     // Récupérer le statut d'un batch (avec polling)
@@ -132,10 +146,13 @@ export const apiService = baseApi.injectEndpoints({
     // Récupérer tous les batches d'un utilisateur
     getUserBatches: builder.query<UserBatchesResponse, string>({
       query: (pseudo) => `/user/${pseudo}/batches`,
-      providesTags: ['Batch'],
-     transformResponse: (response: UserBatchesResponse) => {
+      providesTags: (result, error, pseudo) => [
+        'Batch',
+        { type: 'UserBatches', id: pseudo }
+      ],
+      transformResponse: (response: UserBatchesResponse) => {
         return response;
-     },
+      },
     }),
 
     // Récupérer toutes les pages traduites d'un utilisateur

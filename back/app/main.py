@@ -19,50 +19,40 @@ import base64
 import io
 from PIL import Image
 import asyncio
-
-# Importation des modules de transformation - VERSION DYNAMIQUE
+# Importation des modules de transformation - VERSION SIMPLIFIÉE pour Docker
 import sys
 import os
 from pathlib import Path
 
-# Trouver dynamiquement le répertoire racine du projet "scantrad"
-current_file = Path(__file__).resolve()
-project_root = None
+# Correction : ajouter le parent du dossier courant (/app) et /app/transformer dans le sys.path
+base_dir = str(Path(__file__).resolve().parent.parent)  # /app
+transformer_dir = os.path.join(base_dir, "transformer") # /app/transformer
 
-# Remonter dans l'arborescence jusqu'à trouver le dossier "scantrad"
-for parent in current_file.parents:
-    if parent.name == "scantrad":
-        project_root = parent
-        break
+#afficher les chemins pour le débogage
+print(f"Base directory: {base_dir}")
+print(f"Transformer directory: {transformer_dir}")
 
-if project_root is None:
-    # Fallback: essayer de trouver via le nom du dossier
-    current_dir = Path.cwd()
-    for parent in [current_dir] + list(current_dir.parents):
-        if parent.name == "scantrad" or (parent / "transformer").exists():
-            project_root = parent
-            break
+for p in [base_dir, transformer_dir]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
-if project_root:
-    transformer_path = str(project_root)
-    if transformer_path not in sys.path:
-        sys.path.insert(0, transformer_path)
-    print(f"Chemin du projet détecté: {project_root}")
-else:
-    print("Impossible de détecter le chemin du projet automatiquement")
-    # Fallback en cas d'échec
-    current_dir = Path(__file__).parent.parent.parent
-    sys.path.insert(0, str(current_dir))
-
+transformer_imported = False
 try:
     from transformer.herlpers.script_for_app import process_image
-    print("Module de transformation importé avec succès")
+    print(f"Module de transformation importé depuis: {transformer_dir}")
+    transformer_imported = True
 except ImportError as e:
-    print(f"Erreur d'import du module de transformation: {e}")
-    # Fonction de fallback
-    def process_image(image):
-        print("Utilisation de la fonction de fallback")
-        return image
+    print(f"Erreur import transformer: {e}")
+
+if not transformer_imported:
+    print("Impossible d'importer le module de transformation, utilisation du fallback")
+    #afficher les chemins pour le débogage
+    print(f"Base directory: {base_dir}")
+    print(f"Transformer directory: {transformer_dir}")
+    # Fonction de fallback qui renvoie juste l'image originale
+    def process_image(input_image):
+        print("Utilisation de la fonction de fallback - aucune transformation appliquée")
+        return input_image
 
 app = FastAPI()
 
@@ -200,7 +190,7 @@ async def upload_batch(
     
     return UploadBatchResponse(batchId=batch_id)
 
-async def transform_processing(batch_is: str, user_id: str):
+async def transform_processing(batch_id: str, user_id: str):
     """Traitement réel des images avec le modèle YOLO et traduction"""
     batch = await app.mongodb.batches.find_one({"_id": batch_id})
     if not batch:
@@ -313,14 +303,37 @@ async def get_user_batches(pseudo: str):
     
     batches_data = await app.mongodb.batches.find({"user_id": user["_id"]}).to_list(100)
     
+    # Garder _id tel quel et ajouter les pages pour le calcul du statut
     batches = []
     for batch_data in batches_data:
-        if "_id" in batch_data:
-            batch_data["id"] = str(batch_data["_id"])
-            del batch_data["_id"]
+        # Récupérer les pages pour calculer le statut
+        pages = []
+        for page_id in batch_data.get("pages_ids", []):
+            page = await app.mongodb.pages.find_one({"_id": page_id})
+            if page:
+                pages.append({
+                    "status": page.get("status", "pending")
+                })
         
-        batch = Batch(**batch_data)
-        batches.append(batch)
+        # Calculer le statut global du batch
+        if pages:
+            if all(p["status"] == "done" for p in pages):
+                batch_status = "done"
+            elif any(p["status"] in ["processing", "done"] for p in pages):
+                batch_status = "processing"
+            else:
+                batch_status = "pending"
+        else:
+            batch_status = batch_data.get("status", "pending")
+        
+        batches.append({
+            "_id": batch_data["_id"],
+            "user_id": batch_data["user_id"],
+            "pages_ids": batch_data.get("pages_ids", []),
+            "created_at": batch_data["created_at"],
+            "status": batch_status,
+            "pages": pages
+        })
     
     return {"batches": batches}
 
@@ -370,81 +383,3 @@ async def websocket_endpoint(websocket: WebSocket):
         print(f"WebSocket error: {e}")
         manager.disconnect(websocket)
 
-@app.get("/debug/db-status")
-async def debug_db_status():
-    """Endpoint pour vérifier le contenu de la base"""
-    try:
-        # Test de connexion
-        await app.mongodb_client.admin.command('ping')        
-        users_count = await app.mongodb.users.count_documents({})
-        batches_count = await app.mongodb.batches.count_documents({})
-        pages_count = await app.mongodb.pages.count_documents({})
-        translated_pages_count = await app.mongodb.translated_pages.count_documents({})
-        
-        # Lister toutes les collections
-        collections = await app.mongodb.list_collection_names()
-        
-        # Récupérer quelques exemples
-        recent_users = []
-        recent_batches = []
-        recent_pages = []
-        recent_translated = []
-        
-        if users_count > 0:
-            recent_users = await app.mongodb.users.find({}).sort("created_at", -1).limit(3).to_list(3)
-        
-        if batches_count > 0:
-            batches_raw = await app.mongodb.batches.find({}).sort("created_at", -1).limit(3).to_list(3)
-            for batch in batches_raw:
-                recent_batches.append({
-                    "id": batch.get("_id"),
-                    "user_id": batch.get("user_id"), 
-                    "pages_count": len(batch.get("pages_ids", [])),
-                    "created_at": batch.get("created_at"),
-                    "status": batch.get("status")
-                })
-        
-        if pages_count > 0:
-            pages_raw = await app.mongodb.pages.find({}).sort("_id", -1).limit(3).to_list(3)
-            for page in pages_raw:
-                recent_pages.append({
-                    "id": page.get("_id"),
-                    "batch_id": page.get("batch_id"),
-                    "filename": page.get("filename"),
-                    "status": page.get("status")
-                })
-        
-        if translated_pages_count > 0:
-            translated_raw = await app.mongodb.translated_pages.find({}).sort("translation_completed_at", -1).limit(3).to_list(3)
-            for t in translated_raw:
-                recent_translated.append({
-                    "id": t.get("_id"),
-                    "page_id": t.get("page_id"),
-                    "filename": t.get("filename")
-                })
-        
-        return {
-            "status": "✅ Connected",
-            "database": "scantrad_db",
-            "collections": collections,
-            "counts": {
-                "users": users_count,
-                "batches": batches_count,
-                "pages": pages_count,
-                "translated_pages": translated_pages_count
-            },
-            "recent_users": [{"id": str(u.get("_id", "")), "pseudo": u.get("pseudo", ""), "created_at": str(u.get("created_at", ""))} for u in recent_users],
-            "recent_batches": recent_batches,
-            "recent_pages": recent_pages,
-            "recent_translated": recent_translated,
-            "mongo_url": MONGO_URL
-        }
-    except Exception as e:
-        import traceback
-        return {
-            "status": "❌ Error",
-            "error": str(e),
-            "error_type": type(e).__name__,
-            "traceback": traceback.format_exc(),
-            "mongo_url": MONGO_URL
-        }

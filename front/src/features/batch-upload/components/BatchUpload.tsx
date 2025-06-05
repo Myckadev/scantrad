@@ -44,8 +44,8 @@ function BatchUpload() {
     data: userBatchesResponse, 
     refetch: refetchBatches,
     isLoading: isLoadingBatches 
-  } = useGetUserBatchesQuery(userPseudo, {
-    skip: !isLoggedIn,
+  } = useGetUserBatchesQuery(userPseudo || '', {
+    skip: !isLoggedIn || !userPseudo,
   });
 
   const userBatches = userBatchesResponse?.batches || [];
@@ -58,7 +58,8 @@ function BatchUpload() {
     try {
       await login(userPseudo.trim()).unwrap();
       setIsLoggedIn(true);
-      refetchBatches();
+      // Pas besoin de refetch, la query va se déclencher automatiquement
+      // car skip va devenir false
     } catch (error) {
       console.error('Login failed:', error);
     }
@@ -96,20 +97,31 @@ function BatchUpload() {
     if (files.length === 0 || !isLoggedIn) return;
 
     try {
-      // Créer le FormData avec les fichiers
-      const formData = new FormData();
-      files.forEach((fileData) => {
-        formData.append('files', fileData.file);
-      });
+      // Convertir chaque fichier en base64
+      const pages = await Promise.all(
+        files.map(async (fileData) => {
+          return new Promise<{ filename: string; image_base64: string }>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const base64 = reader.result as string;
+              // Enlever le préfixe "data:image/...;base64," pour garder seulement la partie base64
+              const base64Data = base64.split(',')[1];
+              resolve({
+                filename: fileData.file.name,
+                image_base64: base64Data
+              });
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(fileData.file);
+          });
+        })
+      );
 
-      // L'API de Mikael utilise le header X-User-Pseudo automatiquement
-      const result = await uploadBatch(formData).unwrap();
+      // Envoyer les données au format JSON attendu par le backend
+      const result = await uploadBatch({ pages }).unwrap();
       
       // Nettoyer les fichiers locaux
       clearFiles();
-      
-      // Rafraîchir la liste des batches
-      refetchBatches();
       
       // Rediriger vers la galerie du nouveau batch
       navigate(`/gallery/${result.batchId}`);
@@ -303,7 +315,7 @@ function BatchUpload() {
           </Typography>
         ) : (
           <RecentBatches 
-            batches={userBatches || []} 
+            batches={userBatches} 
           />
         )}
       </Paper>
