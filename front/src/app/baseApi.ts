@@ -5,6 +5,6 @@ export const baseApi = createApi({
   baseQuery: fetchBaseQuery({
     baseUrl: import.meta.env.VITE_API_URL || 'http://localhost:8000',
   }),
-  tagTypes: ['Batch', 'Status', 'Result', 'PROGRESS'],
+  tagTypes: ['BATCH', 'STATUS', 'RESULT', 'PROGRESS'],
   endpoints: () => ({}),
 });
