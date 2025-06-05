@@ -1,4 +1,3 @@
-// features/batchUpload/components/FileCard.tsx
 import React from 'react';
 import {
   Card,

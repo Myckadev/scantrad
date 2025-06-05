@@ -1,5 +1,3 @@
-// features/gallery/components/GalleryStats.tsx
-// GalleryStats.tsx - pas besoin d'import React
 import {
   Paper,
   Typography,

@@ -1,5 +1,3 @@
-// features/gallery/components/ReaderMode.tsx
-// ReaderMode.tsx - pas besoin d'import React
 import {
   Paper,
   Typography,

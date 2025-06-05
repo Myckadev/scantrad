@@ -1,5 +1,3 @@
-// features/gallery/components/GalleryView.tsx
-// GalleryView.tsx - pas besoin d'import React
 import {
   Card,
   CardMedia,
