@@ -141,7 +141,7 @@ function BatchUpload() {
   return (
     <Box sx={{ maxWidth: 1200, mx: 'auto', p: 3 }}>
       <Typography variant="h4" gutterBottom align="center" sx={{ mb: 4 }}>
-        📤 Upload de Manga
+        Upload de Manga
       </Typography>
       
       {/* Zone de drag & drop */}
@@ -165,8 +165,8 @@ function BatchUpload() {
         <CloudUpload sx={{ fontSize: 64, color: 'primary.main', mb: 2 }} />
         <Typography variant="h6" gutterBottom>
           {isDragActive 
-            ? "📥 Déposez vos fichiers ici..." 
-            : "🖼️ Glissez-déposez vos images ou cliquez pour sélectionner"
+            ? "Déposez vos fichiers ici..." 
+            : "Glissez-déposez vos images ou cliquez pour sélectionner"
           }
         </Typography>
         <Typography variant="body2" color="textSecondary">
@@ -179,7 +179,7 @@ function BatchUpload() {
         <Paper sx={{ p: 3, mb: 3 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
             <Typography variant="h6">
-              📁 Fichiers sélectionnés ({files.length})
+              Fichiers sélectionnés ({files.length})
             </Typography>
             <Box sx={{ display: 'flex', gap: 2 }}>
               <Button 
