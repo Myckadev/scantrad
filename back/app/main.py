@@ -47,7 +47,6 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"]
-    expose_headers=["*"]
 )
 
 MONGO_URL = os.getenv("MONGO_URL", "mongodb://mongo:27017")
@@ -168,21 +167,15 @@ async def transform_processing(batch_id: str, user_id: str, pages: List[PageInit
             print('je suis dehors')
             continue
         print("y'a match")
-        
+
         print("j'ai atttendu")
         await app.mongodb.pages.update_one({"_id": page_id}, {"$set": {"status": "processing"}})
-        print("pas la")
         await manager.broadcast(f"Page {page['filename']} is processing")
-        print("j'ai broadcasté")
 
         try:
-            print("je suis dans le try")
             image_input = base64.b64decode(page['original_image'])
-            print("j'ai décodé l'image")
             image_data = Image.open(io.BytesIO(image_input)).convert("RGB")
-            print("j'ai ouvert l'image")
             translated_image = process_image(image_data)
-            print("j'ai traité l'image")
             buffer = io.BytesIO()
             translated_image.save(buffer, format="PNG")
             img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
@@ -220,20 +213,6 @@ async def transform_processing(batch_id: str, user_id: str, pages: List[PageInit
             await manager.broadcast(f"Page {page['filename']} failed: {str(e)}")
 
     await app.mongodb.batches.update_one({"_id": batch_id}, {"$set": {"status": "completed"}})
-
-    translated_pages = await app.mongodb.translated_pages.find(
-        {"batch_id": batch_id, "user_id": user_id}
-    ).to_list(100)
-    os.makedirs("translated_images", exist_ok=True)
-    for tp in translated_pages:
-        try:
-            img_data = base64.b64decode(tp["translated_image"])
-            fname = f"{batch_id}_{tp['page_id']}_{datetime.utcnow():%Y%m%d%H%M%S}.png"
-            with open(os.path.join("translated_images", fname), "wb") as f:
-                f.write(img_data)
-            logger.info(f"Image traduite enregistrée : {fname}")
-        except Exception as e:
-            logger.error(f"Erreur sauvegarde image traduite : {e}")
 
 @app.get("/result/{batch_id}")
 async def get_result(batch_id: str, x_user_pseudo: Optional[str] = Header(None)):
