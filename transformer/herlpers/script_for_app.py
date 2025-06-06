@@ -1,11 +1,67 @@
 from ultralytics import YOLO
 from PIL import Image
 from io import BytesIO
-
+import os
+from pathlib import Path
+import torch
+import ultralytics.nn.tasks
+from ultralytics.nn.tasks import DetectionModel
+# Correction : retirer C3k de l'import (il n'existe pas dans ultralytics.nn.modules.block)
+from ultralytics.nn.modules.block import C3k2
 from herlpers.extract_and_translate import extract_and_translate
 from herlpers.draw import draw_translations
 
-model = YOLO("scantrad/transformer/yolo_scan_model.pt")
+# Charger le modèle de manière dynamique
+def find_model_path():
+    """Trouve le chemin du modèle YOLO de manière dynamique"""
+    current_file = Path(__file__).resolve()
+
+    # Chemins possibles relatifs au projet
+    possible_paths = [
+        current_file.parent.parent / "best.pt",
+        current_file.parent.parent.parent / "best.pt",
+        current_file.parent.parent / "transformer" / "best.pt"
+    ]
+
+    # Chercher dans les dossiers parents pour "scantrad"
+    for parent in current_file.parents:
+        if parent.name == "scantrad":
+            possible_paths.extend([
+                parent / "transformer" / "best.pt",
+                parent / "best.pt"
+            ])
+            break
+
+    for path in possible_paths:
+        if path.exists():
+            print(f"Modèle YOLO trouvé: {path}")
+            return str(path)
+
+    print("Modèle YOLO non trouvé dans les emplacements standards")
+    return None
+
+# Autoriser les objets nécessaires à la désérialisation dans PyTorch >= 2.6
+torch.serialization.add_safe_globals([
+    torch.nn.modules.container.Sequential,
+    DetectionModel,
+    # Retirer C3k ici aussi
+    C3k2
+])
+
+model_path = find_model_path()
+
+if model_path:
+    try:
+        # Forcer le chargement complet (pas seulement des poids)
+        ckpt = torch.load(model_path, map_location='cpu', weights_only=False)
+        model = YOLO(model=ckpt)
+        print("Modèle YOLO chargé avec succès.")
+    except Exception as e:
+        print(f"Erreur lors du chargement du modèle YOLO : {e}")
+        model = None
+else:
+    print("Aucun chemin de modèle trouvé.")
+    model = None
 
 def yolo_prediction_to_yolo_format(results, image_size):
     width, height = image_size
@@ -22,12 +78,16 @@ def yolo_prediction_to_yolo_format(results, image_size):
     return yolo_boxes
 
 def process_image(input_image: Image.Image) -> Image.Image:
-    results = model(input_image)[0]
+    if model is None:
+        print("Model not available, returning original image")
+        return input_image
 
-    yolo_boxes = yolo_prediction_to_yolo_format(results, input_image.size)
-
-    translations = extract_and_translate(input_image, yolo_boxes)
-
-    final_image = draw_translations(input_image, translations)
-
-    return final_image
+    try:
+        results = model(input_image)[0]
+        yolo_boxes = yolo_prediction_to_yolo_format(results, input_image.size)
+        translations = extract_and_translate(input_image, yolo_boxes)
+        final_image = draw_translations(input_image, translations)
+        return final_image
+    except Exception as e:
+        print(f"Error processing image: {e}")
+        return input_image
