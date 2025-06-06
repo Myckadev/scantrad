@@ -32,9 +32,9 @@ def find_yolo_model_path():
     
     # Chemins possibles relatifs au projet
     possible_paths = [
-        project_root / "transformer" / "yolo_scan_model.pt",
-        project_root / "yolo_scan_model.pt",
-        project_root / "models" / "yolo_scan_model.pt"
+        project_root / "transformer" / "best.pt",
+        project_root / "best.pt",
+        project_root / "models" / "best.pt"
     ]
     
     # Tester chaque chemin
