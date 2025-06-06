@@ -6,6 +6,8 @@ from pathlib import Path
 import torch
 import ultralytics.nn.tasks
 from ultralytics.nn.tasks import DetectionModel
+# Correction : retirer C3k de l'import (il n'existe pas dans ultralytics.nn.modules.block)
+from ultralytics.nn.modules.block import C3k2
 from herlpers.extract_and_translate import extract_and_translate
 from herlpers.draw import draw_translations
 
@@ -16,17 +18,17 @@ def find_model_path():
 
     # Chemins possibles relatifs au projet
     possible_paths = [
-        current_file.parent.parent / "yolo_scan_model.pt",
-        current_file.parent.parent.parent / "yolo_scan_model.pt",
-        current_file.parent.parent / "transformer" / "yolo_scan_model.pt"
+        current_file.parent.parent / "best.pt",
+        current_file.parent.parent.parent / "best.pt",
+        current_file.parent.parent / "transformer" / "best.pt"
     ]
 
     # Chercher dans les dossiers parents pour "scantrad"
     for parent in current_file.parents:
         if parent.name == "scantrad":
             possible_paths.extend([
-                parent / "transformer" / "yolo_scan_model.pt",
-                parent / "yolo_scan_model.pt"
+                parent / "transformer" / "best.pt",
+                parent / "best.pt"
             ])
             break
 
@@ -41,7 +43,9 @@ def find_model_path():
 # Autoriser les objets nécessaires à la désérialisation dans PyTorch >= 2.6
 torch.serialization.add_safe_globals([
     torch.nn.modules.container.Sequential,
-    DetectionModel
+    DetectionModel,
+    # Retirer C3k ici aussi
+    C3k2
 ])
 
 model_path = find_model_path()

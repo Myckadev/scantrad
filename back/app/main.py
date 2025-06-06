@@ -203,8 +203,8 @@ async def transform_processing(batch_id: str, user_id: str):
         if not page:
             continue
             
-        # Attendre 1 seconde avant de commencer le traitement
-        await asyncio.sleep(1)
+        # Attendre 5 seconde avant de commencer le traitement
+        await asyncio.sleep(5)
         
         # Changer le statut à "processing"
         await app.mongodb.pages.update_one(
