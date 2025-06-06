@@ -156,8 +156,14 @@ export const apiService = baseApi.injectEndpoints({
     }),
 
     // Récupérer toutes les pages traduites d'un utilisateur
-    getUserTranslatedPages: builder.query<UserTranslatedPagesResponse, string>({
-      query: (pseudo) => `/user/${pseudo}/translated-pages`,
+    getUserTranslatedPages: builder.query<UserTranslatedPagesResponse, void>({
+      query: () => {
+        const pseudo = getCurrentUser();
+        if (!pseudo) {
+          throw new Error("Aucun pseudo utilisateur défini pour la récupération des pages traduites.");
+        }
+        return `/user/${pseudo}/translated-pages`;
+      },
       providesTags: ['Result'],
     }),
 

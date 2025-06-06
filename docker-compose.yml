@@ -16,7 +16,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./transformer/:/app/transformer:ro
+      - ./back/images:/app/translated_images
     depends_on:
       - mongo
 
