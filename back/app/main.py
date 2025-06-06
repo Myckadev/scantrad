@@ -9,7 +9,6 @@ from .models import (
     PageUploadRequest, UploadBatchRequest,
     PageData
 )
-
 from typing import List, Optional
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
@@ -19,44 +18,22 @@ import base64
 import io
 from PIL import Image
 import asyncio
-# Importation des modules de transformation - VERSION SIMPLIFIÉE pour Docker
-import sys
-import os
-from pathlib import Path
+import logging
+from app.script_for_app import process_image
 
-# Correction : ajouter le parent du dossier courant (/app) et /app/transformer dans le sys.path
-base_dir = str(Path(__file__).resolve().parent.parent)  # /app
-transformer_dir = os.path.join(base_dir, "transformer") # /app/transformer
+# Setup logger
+logger = logging.getLogger("uvicorn.error")
 
-#afficher les chemins pour le débogage
-print(f"Base directory: {base_dir}")
-print(f"Transformer directory: {transformer_dir}")
-
-for p in [base_dir, transformer_dir]:
-    if p not in sys.path:
-        sys.path.insert(0, p)
-
-transformer_imported = False
+# Import transformer module
 try:
-    from transformer.herlpers.script_for_app import process_image
-    print(f"Module de transformation importé depuis: {transformer_dir}")
-    transformer_imported = True
-except ImportError as e:
-    print(f"Erreur import transformer: {e}")
-
-if not transformer_imported:
-    print("Impossible d'importer le module de transformation, utilisation du fallback")
-    #afficher les chemins pour le débogage
-    print(f"Base directory: {base_dir}")
-    print(f"Transformer directory: {transformer_dir}")
-    # Fonction de fallback qui renvoie juste l'image originale
-    def process_image(input_image):
-        print("Utilisation de la fonction de fallback - aucune transformation appliquée")
-        return input_image
+    #from app.script_for_app import *
+    logger.info("Module de transformation importé")
+except ImportError:
+    logger.warning("Fallback: fonction de transformation non trouvée")
 
 app = FastAPI()
 
-# CORS pour le frontend - Configuration corrigée pour Codespaces
+# CORS config — retirez '*' en production
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -64,8 +41,7 @@ app.add_middleware(
         "https://urban-goggles-vw9vq5w6g5x245-3001.app.github.dev", 
         "https://urban-goggles-vw9vq5w6g5x245-5173.app.github.dev",
         "http://localhost:3000",
-        "http://localhost:5173",
-        "*"  # Fallback permissif pour le développement
+        "http://localhost:5173"
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -73,87 +49,83 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
-# MongoDB connection
 MONGO_URL = os.getenv("MONGO_URL", "mongodb://mongo:27017")
 
 @app.on_event("startup")
 async def startup_db_client():
     app.mongodb_client = AsyncIOMotorClient(MONGO_URL)
     app.mongodb = app.mongodb_client["scantrad_db"]
-    
-    # Forcer la création des collections avec indexes
+    # Create indexes
     await app.mongodb.users.create_index("pseudo", unique=True)
     await app.mongodb.batches.create_index("user_id")
     await app.mongodb.pages.create_index([("batch_id", 1), ("page_id", 1)])
     await app.mongodb.pages.create_index("page_id", unique=True)
     await app.mongodb.translated_pages.create_index([("user_id", 1), ("batch_id", 1)])
     await app.mongodb.translated_pages.create_index("page_id", unique=True)
-    print("MongoDB connected and collections initialized")
+    logger.info("MongoDB connecté et indexes créés")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
     app.mongodb_client.close()
 
-# Authentication helper
 async def get_user_by_pseudo(pseudo: str):
     user = await app.mongodb.users.find_one({"pseudo": pseudo})
     if not user:
-        # Create user if doesn't exist
-        new_user = {
-            "_id": str(uuid.uuid4()),
-            "pseudo": pseudo,
-            "created_at": datetime.utcnow()
-        }
+        new_user = {"_id": str(uuid.uuid4()), "pseudo": pseudo, "created_at": datetime.utcnow()}
         await app.mongodb.users.insert_one(new_user)
-
-        return new_user 
+        return new_user
     return user
 
-# --- WebSocket Manager ---
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
 
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        self.active_connections.append(ws)
+        logger.info(f"WebSocket connected: {ws.client}")
 
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+    def disconnect(self, ws: WebSocket):
+        if ws in self.active_connections:
+            self.active_connections.remove(ws)
+            logger.info(f"WebSocket disconnected: {ws.client}")
 
     async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            await connection.send_text(message)
+        disconnected = []
+        for conn in self.active_connections:
+            try:
+                await conn.send_text(message)
+            except Exception as e:
+                logger.warning(f"WebSocket disconnected or failed during broadcast: {e}")
+                disconnected.append(conn)
+        for conn in disconnected:
+            self.disconnect(conn)
+
 
 manager = ConnectionManager()
 
 @app.post("/auth/login")
 async def login(request: LoginRequest):
     if not request.pseudo or len(request.pseudo) < 2:
-        raise HTTPException(status_code=400, detail="Pseudo must be at least 2 characters")
-    
+        raise HTTPException(status_code=400, detail="Pseudo doit faire au moins 2 caractères")
     user = await get_user_by_pseudo(request.pseudo.strip())
     return LoginResponse(pseudo=user["pseudo"], message="Login successful")
-
 
 @app.post("/upload-batch", response_model=UploadBatchResponse)
 async def upload_batch(
     background_tasks: BackgroundTasks,
-    request: UploadBatchRequest,  
+    request: UploadBatchRequest,
     x_user_pseudo: Optional[str] = Header(None)
 ):
     if not x_user_pseudo:
-        raise HTTPException(status_code=401, detail="User pseudo required in X-User-Pseudo header")
-
+        raise HTTPException(status_code=401, detail="Header X-User-Pseudo requis")
     user = await get_user_by_pseudo(x_user_pseudo)
+
     batch_id = str(uuid.uuid4())
-    page_ids = []
-    
-    # Créer chaque page séparément dans la collection pages
-    for page_request in request.pages:  
+    page_to_process: List[PageInitial] = []
+
+    for page_request in request.pages:
         page_id = str(uuid.uuid4())
-        
-        # Créer la page avec le nouveau modèle PageInitial
         page_data = PageInitial(
             page_id=page_id,
             batch_id=batch_id,
@@ -164,82 +136,59 @@ async def upload_batch(
             original_url=f"data:image/jpeg;base64,{page_request.image_base64}",
             translated_url=None
         )
-        
-        # Sauvegarder la page dans la collection pages
+        page_to_process.append(page_data)
+
         page_dict = page_data.dict()
-        page_dict["_id"] = page_id
+        page_dict["_id"] = page_dict["page_id"]
         await app.mongodb.pages.insert_one(page_dict)
-        
-        page_ids.append(page_id)
-    
-    # Créer le batch avec les IDs des pages
-    batch = Batch(
-        id=batch_id,
-        user_id=user["_id"],
-        pages_ids=page_ids,
-        created_at=datetime.utcnow(),
-        status="processing"
-    )
-    
-    # Sauvegarder le batch
+
+    batch = Batch(id=batch_id, user_id=user["_id"],
+                  pages_ids=[p.page_id for p in page_to_process],
+                  created_at=datetime.utcnow(), status="processing")
     batch_dict = batch.dict()
     batch_dict["_id"] = batch_dict.pop("id")
     await app.mongodb.batches.insert_one(batch_dict)
-    
-    background_tasks.add_task(transform_processing, batch_id, user["_id"])
-    
+
+    #background_tasks.add_task(transform_processing, batch_id, user["_id"], page_to_process)
+    await transform_processing(batch_id, user["_id"], page_to_process)
+    logger.info(f"Batch {batch_id} queued for processing")
     return UploadBatchResponse(batchId=batch_id)
 
-async def transform_processing(batch_id: str, user_id: str):
-    """Traitement réel des images avec le modèle YOLO et traduction"""
+async def transform_processing(batch_id: str, user_id: str, pages: List[PageInitial]):
+    logger.info(f"Traitement du batch {batch_id} démarré")
     batch = await app.mongodb.batches.find_one({"_id": batch_id})
     if not batch:
         return
-    
-    # Traiter chaque page par son ID
-    for page_id in batch.get("pages_ids", []):
-        # Récupérer la page
+    for page_data in pages:
+        page_id = page_data.page_id
         page = await app.mongodb.pages.find_one({"_id": page_id})
+        print("page-id" + page_id)
         if not page:
+            print('je suis dehors')
             continue
-            
-        # Attendre 5 seconde avant de commencer le traitement
-        await asyncio.sleep(5)
-        
-        # Changer le statut à "processing"
-        await app.mongodb.pages.update_one(
-            {"_id": page_id},
-            {"$set": {"status": "processing"}}
-        )
-        
-        # Broadcaster l'update via WebSocket
+        print("y'a match")
+
+        print("j'ai atttendu")
+        await app.mongodb.pages.update_one({"_id": page_id}, {"$set": {"status": "processing"}})
         await manager.broadcast(f"Page {page['filename']} is processing")
-        
+
         try:
-            # Décoder l'image base64
-            image_data = base64.b64decode(page['original_image'])
-            original_image = Image.open(io.BytesIO(image_data)).convert("RGB")
-            
-            # Traitement réel avec le modèle
-            translated_image = process_image(original_image)
-            
-            # Convertir l'image traduite en base64
+            image_input = base64.b64decode(page['original_image'])
+            image_data = Image.open(io.BytesIO(image_input)).convert("RGB")
+            translated_image = process_image(image_data)
             buffer = io.BytesIO()
             translated_image.save(buffer, format="PNG")
-            translated_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-            translated_url = f"data:image/png;base64,{translated_base64}"
-            
-            # Mettre à jour la page avec la traduction
+            img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            translated_url = f"data:image/png;base64,{img_base64}"
+
             await app.mongodb.pages.update_one(
                 {"_id": page_id},
                 {"$set": {
                     "status": "done",
-                    "translated_image": translated_base64,
+                    "translated_image": img_base64,
                     "translated_url": translated_url
                 }}
             )
-            
-            # Sauvegarder la page traduite dans une collection séparée
             translated_page = {
                 "_id": str(uuid.uuid4()),
                 "page_id": page_id,
@@ -247,139 +196,113 @@ async def transform_processing(batch_id: str, user_id: str):
                 "batch_id": batch_id,
                 "filename": page["filename"],
                 "original_image": page["original_image"],
-                "translated_image": translated_base64,
+                "translated_image": img_base64,
                 "original_url": page["original_url"],
                 "translated_url": translated_url,
                 "translation_completed_at": datetime.utcnow(),
                 "processing_time_seconds": 3
             }
-            
             await app.mongodb.translated_pages.insert_one(translated_page)
-            
-            # Broadcaster l'update via WebSocket
             await manager.broadcast(f"Page {page['filename']} is done")
-            
         except Exception as e:
-            # En cas d'erreur, marquer la page comme échouée
+            logger.error(f"Erreur sur la page {page['filename']}: {e}")
             await app.mongodb.pages.update_one(
                 {"_id": page_id},
                 {"$set": {"status": "error", "error_message": str(e)}}
             )
             await manager.broadcast(f"Page {page['filename']} failed: {str(e)}")
-    
-    # Mettre à jour le statut du batch à "completed"
-    await app.mongodb.batches.update_one(
-        {"_id": batch_id},
-        {"$set": {"status": "completed"}}
-    )
+
+    await app.mongodb.batches.update_one({"_id": batch_id}, {"$set": {"status": "completed"}})
 
 @app.get("/result/{batch_id}")
 async def get_result(batch_id: str, x_user_pseudo: Optional[str] = Header(None)):
     if not x_user_pseudo:
-        raise HTTPException(status_code=401, detail="User pseudo required")
-    
+        raise HTTPException(status_code=401, detail="User pseudo requis")
     user = await app.mongodb.users.find_one({"pseudo": x_user_pseudo})
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
+        raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
+
     batch = await app.mongodb.batches.find_one({"_id": batch_id, "user_id": user["_id"]})
     if not batch:
-        raise HTTPException(status_code=404, detail="Batch not found")
-    
-    # Récupérer toutes les pages du batch
-    pages = []
-    for page_id in batch.get("pages_ids", []):
-        page = await app.mongodb.pages.find_one({"_id": page_id})
-        if page:
-            pages.append(page)
-    
+        raise HTTPException(status_code=404, detail="Batch non trouvé")
+
+    page_ids = batch.get("pages_ids", [])
+    pages = await app.mongodb.pages.find({"_id": {"$in": page_ids}}).to_list(len(page_ids))
     return {"pages": pages}
 
 @app.get("/user/{pseudo}/batches")
 async def get_user_batches(pseudo: str):
     user = await app.mongodb.users.find_one({"pseudo": pseudo})
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    batches_data = await app.mongodb.batches.find({"user_id": user["_id"]}).to_list(100)
-    
-    # Garder _id tel quel et ajouter les pages pour le calcul du statut
-    batches = []
-    for batch_data in batches_data:
-        # Récupérer les pages pour calculer le statut
-        pages = []
-        for page_id in batch_data.get("pages_ids", []):
-            page = await app.mongodb.pages.find_one({"_id": page_id})
-            if page:
-                pages.append({
-                    "status": page.get("status", "pending")
-                })
-        
-        # Calculer le statut global du batch
-        if pages:
-            if all(p["status"] == "done" for p in pages):
-                batch_status = "done"
-            elif any(p["status"] in ["processing", "done"] for p in pages):
-                batch_status = "processing"
+        raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
+
+    batches = await app.mongodb.batches.find({"user_id": user["_id"]}).to_list(100)
+    result = []
+
+    for batch in batches:
+        page_ids = batch.get("pages_ids", [])
+        pages = await app.mongodb.pages.find({"_id": {"$in": page_ids}}).to_list(len(page_ids))
+        statuses = [p.get("status", "pending") for p in pages]
+
+        if statuses:
+            if all(s == "done" for s in statuses):
+                status = "done"
+            elif any(s in ("processing","done") for s in statuses):
+                status = "processing"
             else:
-                batch_status = "pending"
+                status = "pending"
         else:
-            batch_status = batch_data.get("status", "pending")
-        
-        batches.append({
-            "_id": batch_data["_id"],
-            "user_id": batch_data["user_id"],
-            "pages_ids": batch_data.get("pages_ids", []),
-            "created_at": batch_data["created_at"],
-            "status": batch_status,
-            "pages": pages
+            status = batch.get("status", "pending")
+
+        result.append({
+            "_id": batch["_id"],
+            "user_id": batch["user_id"],
+            "pages_ids": page_ids,
+            "created_at": batch["created_at"],
+            "status": status,
+            "pages": [{"status": s} for s in statuses]
         })
-    
-    return {"batches": batches}
+
+    return {"batches": result}
 
 @app.get("/user/{pseudo}/translated-pages", response_model=TranslatedPagesResponse)
 async def get_user_translated_pages(pseudo: str):
     user = await app.mongodb.users.find_one({"pseudo": pseudo})
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    translated_data = await app.mongodb.translated_pages.find({"user_id": user["_id"]}).sort("translation_completed_at", -1).to_list(100)
-    
-    # Convertir en modèles Pydantic
-    translated_pages = []
-    for data in translated_data:
-        data["id"] = data.pop("_id")  # Convertir _id en id
-        translated_pages.append(TranslatedPage(**data))
-    
-    return TranslatedPagesResponse(translated_pages=translated_pages)
+        raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
+
+    translated = await app.mongodb.translated_pages.find(
+        {"user_id": user["_id"]}
+    ).sort("translation_completed_at", -1).to_list(100)
+
+    pages = []
+    for data in translated:
+        data["id"] = data.pop("_id")
+        pages.append(TranslatedPage(**data))
+    return TranslatedPagesResponse(translated_pages=pages)
 
 @app.get("/batch/{batch_id}/translated-pages")
 async def get_batch_translated_pages(batch_id: str, x_user_pseudo: Optional[str] = Header(None)):
-    """Récupérer toutes les pages traduites d'un batch spécifique"""
     if not x_user_pseudo:
-        raise HTTPException(status_code=401, detail="User pseudo required")
-    
+        raise HTTPException(status_code=401, detail="User pseudo requis")
     user = await app.mongodb.users.find_one({"pseudo": x_user_pseudo})
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    translated_pages = await app.mongodb.translated_pages.find({
-        "batch_id": batch_id, 
-        "user_id": user["_id"]
-    }).sort("translation_completed_at", 1).to_list(100)
-    
-    return {"translated_pages": translated_pages}
+        raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
+
+    translated = await app.mongodb.translated_pages.find(
+        {"batch_id": batch_id, "user_id": user["_id"]}
+    ).sort("translation_completed_at", 1).to_list(100)
+    return {"translated_pages": translated}
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+async def websocket_endpoint(ws: WebSocket):
+    await manager.connect(ws)
     try:
         while True:
-            data = await websocket.receive_text()
+            data = await ws.receive_text()
             await manager.broadcast(f"Echo: {data}")
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        manager.disconnect(ws)
     except Exception as e:
-        print(f"WebSocket error: {e}")
-        manager.disconnect(websocket)
-
+        logger.error(f"WebSocket error: {e}")
+        manager.disconnect(ws)
